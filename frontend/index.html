@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Shortest Path Finder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://maps.googleapis.com/maps/api/js?key=API___KEY&libraries=places"></script>
+  <style>
+    header {
+      padding: 1rem;
+      background: #2c3e50;
+      color: white;
+      text-align: center;
+      font-size: 1.5rem;
+    }
+
+    #controls {
+      background: #ffffff;
+      padding: 1rem 2rem;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+      justify-content: center;
+    }
+
+    input {
+      padding: 0.5rem;
+      font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+      width: 180px;
+    }
+
+    button {
+      padding: 0.6rem 1.2rem;
+      font-size: 1rem;
+      background-color: #2980b9;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background-color: #1f6691;
+    }
+
+    #map {
+      height: 65vh;
+      width: 100%;
+    }
+
+    #info {
+      padding: 1rem 2rem;
+      background: #ffffff;
+      border-top: 1px solid #ccc;
+    }
+
+    .route-card {
+      background: #e9f7ef;
+      border-left: 6px solid #2ecc71;
+      padding: 10px 15px;
+      margin-bottom: 10px;
+      border-radius: 5px;
+      font-size: 1rem;
+      animation: slideUp 0.5s ease;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .icon {
+      font-size: 1.2rem;
+      margin-right: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>🧭 Shortest Path Finder</header>
+
+  <div id="controls">
+    <input id="start-place" placeholder="Start Location" />
+    <input id="end-place" placeholder="End Location" />
+    <button onclick="manualSearch()">Search</button>
+    <span>or click two points on the map</span>
+  </div>
+
+  <div id="map"></div>
+  <div id="info"></div>
+
+  <script>
+    let map, markers = [], start = null, end = null, pathLine = null;
+
+    function initMap() {
+      map = new google.maps.Map(document.getElementById("map"), {
+        center: { lat: 28.6139, lng: 77.2090 },
+        zoom: 6,
+      });
+
+      const startInput = document.getElementById("start-place");
+      const endInput = document.getElementById("end-place");
+
+      // Google Places Autocomplete
+      new google.maps.places.Autocomplete(startInput);
+      new google.maps.places.Autocomplete(endInput);
+
+      map.addListener("click", (e) => {
+        if (markers.length >= 2) clearMap();
+
+        const marker = new google.maps.Marker({ position: e.latLng, map });
+        markers.push(marker);
+
+        if (!start) {
+          start = e.latLng;
+        } else {
+          end = e.latLng;
+          fetchRoute(start.lat(), start.lng(), end.lat(), end.lng());
+        }
+      });
+    }
+
+    function clearMap() {
+      markers.forEach(m => m.setMap(null));
+      markers = [];
+      if (pathLine) pathLine.setMap(null);
+      start = end = null;
+      document.getElementById("info").innerHTML = "";
+    }
+
+    function fetchRoute(lat1, lng1, lat2, lng2) {
+      fetch("http://localhost:5000/shortest-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start: { lat: lat1, lng: lng1 }, end: { lat: lat2, lng: lng2 } })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          document.getElementById("info").innerHTML = `<p style="color:red;">❌ ${data.message || data.error}</p>`;
+          return;
+        }
+
+        const pathCoords = data.path.map(p => ({ lat: p[0], lng: p[1] }));
+        pathLine = new google.maps.Polyline({
+          path: pathCoords,
+          geodesic: true,
+          strokeColor: "#FF5733",
+          strokeOpacity: 1.0,
+          strokeWeight: 5,
+          map,
+        });
+
+        document.getElementById("info").innerHTML = `
+          <div class="route-card">
+            <span><span class="icon">🚗</span>Distance: <strong>${data.distance}</strong></span>
+            <span><span class="icon">⏱️</span>Duration: <strong>${data.duration}</strong></span>
+          </div>
+        `;
+      })
+      .catch(err => {
+        document.getElementById("info").innerHTML = `<p style="color:red;">❌ Server error: ${err.message}</p>`;
+      });
+    }
+
+    function manualSearch() {
+      const startPlace = document.getElementById("start-place").value;
+      const endPlace = document.getElementById("end-place").value;
+
+      if (!startPlace || !endPlace) {
+        alert("❌ Please enter both start and end places.");
+        return;
+      }
+
+      fetch("http://localhost:5000/geocode-route", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_place: startPlace, end_place: endPlace })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          document.getElementById("info").innerHTML = `<p style="color:red;">❌ ${data.error}</p>`;
+          return;
+        }
+
+        start = new google.maps.LatLng(data.start.lat, data.start.lng);
+        end = new google.maps.LatLng(data.end.lat, data.end.lng);
+
+        markers.push(new google.maps.Marker({ position: start, map }));
+        markers.push(new google.maps.Marker({ position: end, map }));
+
+        map.setCenter(start);
+        fetchRoute(start.lat(), start.lng(), end.lat(), end.lng());
+      })
+      .catch(err => {
+        document.getElementById("info").innerHTML = `<p style="color:red;">❌ Server error: ${err.message}</p>`;
+      });
+    }
+
+    window.onload = initMap;
+  </script>
+</body>
+</html>
